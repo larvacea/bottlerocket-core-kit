@@ -1,0 +1,28 @@
+#!/bin/env bash
+
+# install govulncheck (harmless if we are already @latest)
+go install golang.org/x/vuln/cmd/govulncheck@latest
+
+root=$(pwd)/build
+rpms=0
+for rpm in $(find $root/kits/bottlerocket-core-kit/*/Packages $root/rpms -name '*.rpm'); do
+  n=$(basename $rpm)
+  rpm2cpio $rpm | cpio -i -d -u -D $root/govuln/$n
+  ((rpms++))
+done
+echo "$rpms RPMs unpacked"
+for f in $(find $root/govuln -executable -type f); do
+  file $f
+done | grep executable, | sed -e 's|:.*||' > $root/govuln/candidates
+echo $(wc -l < $root/govuln/candidates) "binaries to examine"
+result_count=0
+for f in $(cat $root/govuln/candidates); do
+	v=$(govulncheck -mode=binary $f 2>/dev/null | grep 'Vulnerability #' | grep -E -o 'GO-[0-9]*-[0-9]*' | grep -v GO-2022-0646)
+	if [[ -n "$v" ]] ; then
+		short=$(echo $f | sed -e 's|-bin.*br1.|-|' -e 's|.rpm.*/|/|')
+		echo $short: $v
+	        ((result_count++))
+	fi
+done > $root/govuln/results
+echo "$result_count vulnerable binaries"
+
